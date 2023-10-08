@@ -2,7 +2,36 @@ use async_std::io::stdin;
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
+use chat_async::ClientMsg;
 use std::str;
+
+fn parse_command(command: &str) -> Option<ClientMsg> {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    match words[0].to_uppercase().as_str() {
+        "JOIN" => {
+            if words.len() < 2 {
+                None
+            } else {
+                Some(ClientMsg::JoinGroup { group_name: String::from(words[1]) })
+            }
+        },
+        "EXIT" => {
+            if words.len() < 2 {
+                None
+            } else {
+                Some(ClientMsg::ExitGroup { group_name: String::from(words[1]) })
+            }            
+        }
+        "POST" => {
+            if words.len() < 3 {
+                None
+            } else {
+                Some(ClientMsg::GroupMessage { group_name: String::from(words[1]), message: String::from(words[2]) })
+            }
+        },
+        _ => None
+    }
+}
 
 #[async_std::main]
 async fn main() -> std::io::Result<()> {
@@ -30,8 +59,9 @@ async fn main() -> std::io::Result<()> {
             break;
         }
 
-        stream.write_all(line.as_bytes()).await?;
-        //println!("sent");
+        if let Some(json) = parse_command(&line) {
+            stream.write_all(serde_json::to_string(&json).unwrap().as_bytes()).await?;
+        }
     };
 
     Ok(())
