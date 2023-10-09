@@ -6,7 +6,7 @@ use chat_async::ClientMsg;
 use std::str;
 
 fn parse_command(command: &str) -> Option<ClientMsg> {
-    let words: Vec<&str> = command.split_whitespace().collect();
+    let words: Vec<&str> = command.split_whitespace().collect();    // 暂且不支持消息内容中带空格类字符
     match words[0].to_uppercase().as_str() {
         "JOIN" => {
             if words.len() < 2 {
@@ -38,7 +38,7 @@ async fn main() -> std::io::Result<()> {
     let mut stream = TcpStream::connect("127.0.0.1:1111").await?;
 
     let mut incoming = stream.clone();
-    task::spawn(async move {
+    task::spawn_local(async move {
         let mut buf = vec![0; 256];
         while let Ok(n) = incoming.read(&mut buf).await {
             if n == 0 {
@@ -55,12 +55,14 @@ async fn main() -> std::io::Result<()> {
     loop {
         let mut line = String::new();
         stdin.read_line(&mut line).await?;
-        if line.len() == 0 {
+        if line.trim().len() == 0 {
             break;
         }
 
-        if let Some(json) = parse_command(&line) {
-            stream.write_all(serde_json::to_string(&json).unwrap().as_bytes()).await?;
+        if let Some(msg) = parse_command(&line) {
+            let mut buf = serde_json::to_string(&msg).unwrap();
+            buf.push('\n'); // 用换行来区分不同的消息，服务端对应处理
+            stream.write_all(buf.as_bytes()).await?;
         }
     };
 
