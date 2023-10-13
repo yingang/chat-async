@@ -1,9 +1,10 @@
-use async_std::{io::WriteExt, net::TcpStream};
 use chat_async::ServerMsg;
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::SocketAddr, sync::Arc,
 };
+
+use crate::connection::Outcoming;
 
 pub struct GroupTable {
     map: HashMap<String, Group>,
@@ -16,15 +17,15 @@ impl GroupTable {
         }
     }
 
-    pub fn join_group(&mut self, group_name: &str, addr: &SocketAddr, stream: &mut TcpStream) {
+    pub fn join_group(&mut self, group_name: &str, addr: &SocketAddr, outcoming: &Arc<Outcoming>) {
         let group = self
             .map
             .entry(group_name.to_string())
             .or_insert(Group::new());
-        group.join(&addr, &stream);
+        group.join(&addr, outcoming);
     }
 
-    pub fn exit_group(&mut self, group_name: &str, addr: &SocketAddr, _stream: &mut TcpStream) {
+    pub fn exit_group(&mut self, group_name: &str, addr: &SocketAddr, _outcoming: &Arc<Outcoming>) {
         let mut remove_group = false;
         if self.map.contains_key(group_name) {
             let group = self.map.get_mut(group_name).unwrap();
@@ -39,7 +40,7 @@ impl GroupTable {
         &mut self,
         group_name: &str,
         sender_addr: &SocketAddr,
-        sender_stream: &mut TcpStream,
+        outcoming: &Arc<Outcoming>,
         msg: &str,
     ) {
         if self.map.contains_key(group_name) {
@@ -58,13 +59,13 @@ impl GroupTable {
             };
             let mut json = serde_json::to_string(&msg).unwrap();
             json.push('\n');
-            let _ = sender_stream.write_all(json.as_bytes()).await;
+            let _ = outcoming.send(&json).await;
         }
     }
 }
 
 pub struct Group {
-    map: HashMap<String, TcpStream>,
+    map: HashMap<String, Arc<Outcoming>>,
 }
 
 impl Group {
@@ -74,8 +75,8 @@ impl Group {
         }
     }
 
-    pub fn join(&mut self, addr: &SocketAddr, stream: &TcpStream) {
-        self.map.insert(addr.to_string(), stream.clone());
+    pub fn join(&mut self, addr: &SocketAddr, outcoming: &Arc<Outcoming>) {
+        self.map.insert(addr.to_string(), outcoming.clone());
     }
 
     /// return true if no entry left after the exiting, return false otherwise
@@ -89,11 +90,11 @@ impl Group {
 
     pub async fn post(&mut self, sender: &SocketAddr, msg: &str) {
         let mut bad_peer: HashSet<String> = HashSet::new();
-        for (addr, stream) in &mut self.map {
+        for (addr, outcoming) in &self.map {
             if sender.to_string() == *addr {
                 continue;
             }
-            if let Err(err) = stream.write_all(msg.as_bytes()).await {
+            if let Err(err) = outcoming.send(&msg).await {
                 println!("failed to send to {}: {}", &addr, err);
                 bad_peer.insert(addr.clone());
             } else {

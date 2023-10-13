@@ -6,8 +6,10 @@ use async_std::task;
 use chat_async::ClientMsg;
 use std::sync::Arc;
 
+use crate::connection::Outcoming;
 use crate::group::GroupTable;
 
+mod connection;
 mod group;
 
 #[async_std::main]
@@ -18,11 +20,11 @@ async fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind("127.0.0.1:1111").await?;
     loop {
-        let (mut stream, addr) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
         let group_table = global_group_table.clone();
         task::spawn(async move {
-            // thread::spawn是接收一个闭包，task::spawn/spawn_local是接收一个异步块，spawn_local需要启用unstable feature
-            let mut reader = BufReader::new(stream.clone());
+            let outcoming = Arc::new(Outcoming::new(stream.clone()));
+            let mut reader = BufReader::new(stream);
             let mut buf = String::new();
             while let Ok(n) = reader.read_line(&mut buf).await {
                 if n == 0 {
@@ -33,24 +35,24 @@ async fn main() -> std::io::Result<()> {
                     match &msg {
                         ClientMsg::JoinGroup { group_name } => {
                             let mut guard = group_table.lock().await;
-                            guard.join_group(group_name, &addr, &mut stream);
+                            guard.join_group(group_name, &addr, &outcoming);
                         }
                         ClientMsg::ExitGroup { group_name } => {
                             let mut guard = group_table.lock().await;
-                            guard.exit_group(group_name, &addr, &mut stream);
+                            guard.exit_group(group_name, &addr, &outcoming);
                         }
                         ClientMsg::GroupMessage {
                             group_name,
                             message,
                         } => {
                             let mut guard = group_table.lock().await;
-                            guard.post(group_name, &addr, &mut stream, message).await;
+                            guard.post(group_name, &addr, &outcoming, message).await;
                         }
                     }
                 }
                 buf.clear();
             }
-            println!("bye {}!", addr); // 加点输出，不然退出了都不知道
+            println!("bye {}!", &addr); // 加点输出，不然退出了都不知道
         });
     }
 }
